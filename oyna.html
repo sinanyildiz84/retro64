@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>C64</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #oyun { width: 100%; height: 100%; }
+  /* dokunmatik tuşlar (yalnız dokunmatik cihazda): sol altta 8 yönlü kaydırmalı pad, sağ altta ATEŞ, üstte C64 tuşları */
+  #dokun { display: none; }
+  body.dokunmatik #dokun { display: block; }
+  .dk { position: fixed; z-index: 50; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  #yonPad { left: 12px; bottom: 12px; width: min(44vmin, 230px); height: min(44vmin, 230px); border-radius: 50%;
+            background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.25); }
+  #yonPad .ok { position: absolute; color: rgba(255,255,255,.55); font: 700 22px system-ui; transform: translate(-50%, -50%); pointer-events: none; }
+  #yonPad .ok.basili { color: #ffd34d; }
+  #yonTop { position: absolute; width: 34%; height: 34%; left: 33%; top: 33%; border-radius: 50%; background: rgba(255,255,255,.22); pointer-events: none; transition: transform .03s; }
+  #ates { right: 16px; bottom: 24px; width: min(26vmin, 130px); height: min(26vmin, 130px); border-radius: 50%;
+          background: rgba(220,60,60,.45); border: 3px solid rgba(255,140,140,.7); color: #fff; font: 800 18px system-ui;
+          display: flex; align-items: center; justify-content: center; }
+  #ates.basili { background: rgba(255,80,80,.85); }
+  #tuslar { top: 6px; left: 50%; transform: translateX(-50%); display: flex; gap: 5px; flex-wrap: wrap; justify-content: center;
+            width: max-content; max-width: calc(100vw - 150px); }
+  @media (orientation: portrait) { #tuslar { top: auto; bottom: calc(min(44vmin, 230px) + 24px); max-width: calc(100vw - 16px); } }
+  #tuslar button { font: 700 13px system-ui; color: #fff; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.35);
+                   border-radius: 8px; padding: 7px 9px; touch-action: none; }
+  #tuslar button.basili { background: rgba(74,140,255,.8); }
+</style>
+</head>
+<body>
+<div id="oyun"></div>
+<div id="dokun">
+  <div class="dk" id="yonPad"><div id="yonTop"></div></div>
+  <div class="dk" id="ates">ATEŞ</div>
+  <div class="dk" id="tuslar"></div>
+</div>
+<script>
+// Menü (index.html) seçilen oyunu parent.oyunSecili'ye koyar: {kimlik, ad, dosyalar:[{ad, blob}], port, reu}.
+// Oyun dosyası bu sayfaya hiçbir sunucudan gelmez; kullanıcının kendi cihazındaki kopyadır.
+(async function () {
+  const v = parent && parent.oyunSecili;
+  if (!v) { document.body.textContent = 'Oyun seçilmedi.'; return; }
+  const d = v.dosyalar[0];
+  // File bu pencerenin File'ı olmalı: EmulatorJS "gameUrl instanceof File" diye bakıyor (başka pencerenin File'ı geçmez)
+  const dosya = new File([await d.blob.arrayBuffer()], d.ad);
+  window.EJS_player = '#oyun';
+  window.EJS_core = 'vice_x64sc';
+  window.EJS_gameUrl = dosya;
+  window.EJS_gameName = v.kimlik.replace(/[^A-Za-z0-9._-]+/g, '_');   // anlık kayıtlar oyun başına
+  window.EJS_gameID = 64;
+  window.EJS_pathtodata = 'https://cdn.emulatorjs.org/4.2.3/data/';
+  window.EJS_startOnLoaded = true;
+  window.EJS_color = '#4a8cff';
+  window.EJS_backgroundColor = '#000';
+  // Stick'teki gibi: oklar + sol Ctrl joystick, oyunun portunda. Başka tuş RetroPad'e bağlı değil, C64 klavyesine gider
+  // (Space, F1, harfler, rakamlar oyunlardaki menüler için).
+  const bos = {};
+  for (let i = 0; i < 24; i++) bos[i] = { value: '', value2: '' };
+  window.EJS_defaultControls = {
+    0: Object.assign({}, bos, {
+      0: { value: 'ctrl', value2: 'BUTTON_1' },
+      4: { value: 'up arrow', value2: 'DPAD_UP' },
+      5: { value: 'down arrow', value2: 'DPAD_DOWN' },
+      6: { value: 'left arrow', value2: 'DPAD_LEFT' },
+      7: { value: 'right arrow', value2: 'DPAD_RIGHT' }
+    }),
+    1: bos, 2: bos, 3: bos
+  };
+  const secenek = {
+    vice_joyport: String(v.port === 1 ? 1 : 2),
+    vice_physical_keyboard_pass_through: 'disabled',
+    // gerçek sürücü öykünmesi açık: hızlı yükleyicili disketler (California Games) kapalıyken "LOADING"de kalıyordu.
+    // Yavaşlığını yükleme sırasındaki warp kapatıyor.
+    vice_drive_true_emulation: 'enabled',
+    vice_autostart: 'enabled',
+    vice_autoloadwarp: 'enabled',  // disket/kaset yüklenirken hızlı (warp), oyun başlayınca normal hız
+    keyboardInput: 'enabled',     // EmulatorJS'in kendi anahtarı: kapalıyken hiçbir tuş C64 klavyesine gitmiyordu
+    // fare kilidi kapalı: oyuna dokununca imleç gizleniyor, telefonda "imleci göstermek için uygulamalar arasında geçiş
+    // yapın" uyarısı çıkıyordu (2026-10-31). C64 oyunları fare kullanmıyor.
+    lockMouse: 'disabled'
+  };
+  // RetroArch de tıklamada kendisi kilit istiyor: bu sayfada imleç kilidi hiç yok
+  Element.prototype.requestPointerLock = function () { return Promise.resolve(); };
+  const kilitKapat = setInterval(() => { const em = window.EJS_emulator; if (em) { em.enableMouseLock = false; if (em.started) clearInterval(kilitKapat); } }, 200);
+  // dokunmatik cihazda EmulatorJS'in kendi ekran kolu kapalı (yönler takılıyordu); yerine aşağıdaki pad
+  const DOKUNMATIK = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  if (DOKUNMATIK) secenek['virtual-gamepad'] = 'disabled';
+  if (v.reu) secenek.vice_ram_expansion_unit = v.reu + 'kB';
+  window.EJS_defaultOptions = secenek;
+  // RetroArch'ın kendi kısayolları (F1 menü, F2/F4 kayıt, F8 ekran görüntüsü...) C64'ün F tuşlarını yutuyordu: River
+  // Raid "F1 / F3" ile başlar. Oyun odağı açık, kısayollar boş; klavyeden RetroPad'e yalnız oklar + Ctrl (joystick),
+  // geri kalan her tuş (F1-F8, Space, Return, harfler) C64 klavyesine gider.
+  const BOS = ['a', 'x', 'y', 'start', 'select', 'l', 'r', 'l2', 'r2', 'l3', 'r3'].map(b => `input_player1_${b} = "nul"`)
+    .concat(['menu_toggle', 'exit_emulator', 'save_state', 'load_state', 'state_slot_increase', 'state_slot_decrease',
+             'toggle_fast_forward', 'hold_fast_forward', 'hold_slowmotion', 'toggle_slowmotion', 'screenshot', 'audio_mute',
+             'toggle_fullscreen', 'pause_toggle', 'frame_advance', 'rewind', 'reset', 'osk_toggle', 'fps_toggle',
+             'shader_next', 'shader_prev', 'movie_record_toggle', 'netplay_game_watch', 'cheat_index_plus',
+             'cheat_index_minus', 'cheat_toggle', 'volume_up', 'volume_down', 'grab_mouse_toggle', 'disk_eject_toggle',
+             'disk_next', 'disk_prev', 'close_content', 'menu_toggle_gamepad_combo'].map(h => `input_${h} = "nul"`));
+  const EK = ['input_auto_game_focus = "1"', 'input_player1_up = "up"', 'input_player1_down = "down"',
+              'input_player1_left = "left"', 'input_player1_right = "right"', 'input_player1_b = "ctrl"'].concat(BOS).join('\n') + '\n';
+  const yamaBekle = setInterval(() => {
+    const GM = window.EJS_GameManager;
+    if (!GM || GM.prototype.__retroYama) return;
+    const orj = GM.prototype.getRetroArchCfg;
+    GM.prototype.getRetroArchCfg = function () { return orj.call(this) + EK; };
+    GM.prototype.__retroYama = true; clearInterval(yamaBekle);
+  }, 5);
+
+  // Tek HTML (Masaüstü kopyası): emülatör dosyaları sayfanın içinde; parent.GOMULU_EMU = {dosya adı: blob URL}.
+  // EJS_paths dosya adına göre adres verir (emulator.min.js/css, çekirdek .data, rapor .json, extract7z.js): ağ gerekmez.
+  // Blob adresleri her oyunda BU pencerede yeniden üretilir: menünün ürettikleri ilk oyundan sonra geçersiz kalıyordu
+  // (ikinci oyunda "Network Error", telefonda görüldü 2026-10-31; masaüstünde de tekrarlandı).
+  let emu = null;
+  if (parent.GOMULU_EMU_B64) {
+    emu = {};
+    for (const [ad, b64] of Object.entries(parent.GOMULU_EMU_B64)) {
+      const ikili = atob(b64), dizi = new Uint8Array(ikili.length);
+      for (let i = 0; i < ikili.length; i++) dizi[i] = ikili.charCodeAt(i);
+      emu[ad] = URL.createObjectURL(new Blob([dizi], { type: ad.endsWith('.js') ? 'text/javascript' : ad.endsWith('.css') ? 'text/css' : 'application/octet-stream' }));
+    }
+    window.EJS_paths = emu;
+    window.EJS_language = 'en-US';   // dil dosyası ağdan istenmesin (yerleşik İngilizce)
+  }
+  const s = document.createElement('script');
+  s.src = (emu && emu['loader.js']) || 'https://cdn.emulatorjs.org/4.2.3/data/loader.js';
+  document.body.appendChild(s);
+
+  // Oklar + sol Ctrl yalnız joystick: RetroArch'ın klavye dinleyicisi bunları da alıp C64'e imleç tuşu (29/157) ve CTRL
+  // olarak gönderiyordu (stick'te VICE bu tuşları joystick'e ayırıyor). Pencerede, herkesten önce (capture, ilk kayıt)
+  // yakalanır, EmulatorJS'in joystick işleyicisine elle verilir ve başka dinleyiciye gitmez.
+  // (keyboardInput açıkken EmulatorJS kendi tuş eşlemesini atlıyor; RetroPad düğmesi doğrudan basılır: 0 = B = ateş, 4-7 yönler)
+  const JOY = { ArrowUp: 4, ArrowDown: 5, ArrowLeft: 6, ArrowRight: 7, ControlLeft: 0 };
+  for (const t of ['keydown', 'keyup']) window.addEventListener(t, e => {
+    const em = window.EJS_emulator;
+    if (!(e.code in JOY) || !em || !em.started) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    if (!e.repeat) em.gameManager.simulateInput(0, JOY[e.code], t === 'keydown' ? 1 : 0);
+  }, true);
+
+  // ---------------------------------------------------------------- dokunmatik tuşlar
+  // Yön: pad merkezine göre açı -> 8 yön (köşegen iki düğme). Parmak kayınca yön değişir, kalkınca (ya da iptal / yakalama
+  // kaybı) bütün yönler bırakılır: EmulatorJS'in ekran kolunda yön basılı kalıyordu.
+  if (DOKUNMATIK) {
+    document.body.classList.add('dokunmatik');
+    const bas = (n, d) => { const em = window.EJS_emulator; if (em && em.started) em.gameManager.simulateInput(0, n, d); };
+    const pad = document.getElementById('yonPad'), top = document.getElementById('yonTop');
+    const OK = { 4: ['↑', 50, 12], 5: ['↓', 50, 88], 6: ['←', 12, 50], 7: ['→', 88, 50] }, okEl = {};
+    for (const [n, [t, x, y]] of Object.entries(OK)) {
+      const e = document.createElement('div'); e.className = 'ok'; e.textContent = t; e.style.left = x + '%'; e.style.top = y + '%';
+      pad.appendChild(e); okEl[n] = e;
+    }
+    let basili = new Set(), padParmak = null;
+    function yonAyarla(yeni) {
+      for (const n of basili) if (!yeni.has(n)) { bas(n, 0); okEl[n].classList.remove('basili'); }
+      for (const n of yeni) if (!basili.has(n)) { bas(n, 1); okEl[n].classList.add('basili'); }
+      basili = yeni;
+    }
+    function padHesap(e) {
+      const r = pad.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+      const yar = r.width / 2, uz = Math.hypot(dx, dy);
+      const k = Math.min(1, uz / yar); top.style.transform = `translate(${dx / (uz || 1) * k * yar * .45}px, ${dy / (uz || 1) * k * yar * .45}px)`;
+      if (uz < yar * 0.22) return new Set();                       // ortada ölü bölge
+      const a = Math.atan2(dy, dx) * 180 / Math.PI;               // 0 = sağ, 90 = aşağı
+      const s = Math.round(((a + 360) % 360) / 45) % 8;          // 8 dilim
+      return new Set([[7], [7, 5], [5], [5, 6], [6], [6, 4], [4], [4, 7]][s]);
+    }
+    const padBirak = () => { padParmak = null; top.style.transform = ''; yonAyarla(new Set()); };
+    pad.addEventListener('pointerdown', e => { e.preventDefault(); padParmak = e.pointerId; pad.setPointerCapture(e.pointerId); yonAyarla(padHesap(e)); });
+    pad.addEventListener('pointermove', e => { if (e.pointerId === padParmak) yonAyarla(padHesap(e)); });
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) pad.addEventListener(t, e => { if (e.pointerId === padParmak) padBirak(); });
+
+    const ates = document.getElementById('ates'); let atesParmak = null;
+    ates.addEventListener('pointerdown', e => { e.preventDefault(); atesParmak = e.pointerId; ates.setPointerCapture(e.pointerId); ates.classList.add('basili'); bas(0, 1); });
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture'])
+      ates.addEventListener(t, e => { if (e.pointerId === atesParmak) { atesParmak = null; ates.classList.remove('basili'); bas(0, 0); } });
+
+    // C64 tuşları: klavye olayı olarak gönderilir (RetroArch'ın klavye dinleyicisi alır)
+    const TUS = [['F1', 'F1', 112], ['F3', 'F3', 114], ['F5', 'F5', 116], ['F7', 'F7', 118], ['Boşluk', 'Space', 32, ' '],
+                 ['Return', 'Enter', 13], ['1', 'Digit1', 49], ['2', 'Digit2', 50], ['Y', 'KeyY', 89, 'y'], ['N', 'KeyN', 78, 'n']];
+    const kutu = document.getElementById('tuslar');
+    const olay = (tip, code, kod, key) => {
+      const ev = new KeyboardEvent(tip, { key: key || code, code, bubbles: true, cancelable: true });
+      Object.defineProperty(ev, 'keyCode', { get: () => kod }); Object.defineProperty(ev, 'which', { get: () => kod });
+      (document.querySelector('#oyun canvas') || document).dispatchEvent(ev);
+    };
+    for (const [ad, code, kod, key] of TUS) {
+      const b = document.createElement('button'); b.textContent = ad; let p = null;
+      b.addEventListener('pointerdown', e => { e.preventDefault(); p = e.pointerId; b.setPointerCapture(p); b.classList.add('basili'); olay('keydown', code, kod, key || (code.startsWith('F') ? code : ad)); });
+      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture'])
+        b.addEventListener(t, e => { if (e.pointerId === p) { p = null; b.classList.remove('basili'); olay('keyup', code, kod, key || (code.startsWith('F') ? code : ad)); } });
+      kutu.appendChild(b);
+    }
+    addEventListener('contextmenu', e => e.preventDefault());
+    addEventListener('blur', () => { padBirak(); if (atesParmak !== null) { atesParmak = null; ates.classList.remove('basili'); bas(0, 0); } });
+  }
+
+  // Esc'yi 1,5 sn basılı tutmak menüye döner (stick'teki gibi). Kısa Esc oyuna gider.
+  let escZaman = null;
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape' && escZaman === null) escZaman = setTimeout(() => parent.oyunKapat && parent.oyunKapat(), 1500);
+  }, true);
+  addEventListener('keyup', e => {
+    if (e.key === 'Escape' && escZaman !== null) { clearTimeout(escZaman); escZaman = null; }
+  }, true);
+})();
+</script>
+</body>
+</html>

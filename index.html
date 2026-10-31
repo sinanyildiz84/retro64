@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Retro USB · C64</title>
+<style>
+  :root { --zemin: #101018; --kart: #1b1b26; --kart2: #242433; --yazi: #e8e8f0; --soluk: #8a8aa0; --vurgu: #4a8cff; --altin: #f2c14e; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--zemin); color: var(--yazi); font: 15px/1.4 system-ui, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px 16px; position: sticky; top: 0; background: var(--zemin); z-index: 2; border-bottom: 1px solid #23232f; }
+  header h1 { margin: 0; font-size: 18px; white-space: nowrap; }
+  header h1 span { color: var(--vurgu); }
+  #ara { flex: 1 1 180px; min-width: 0; padding: 8px 12px; border-radius: 8px; border: 1px solid #33334a; background: var(--kart); color: var(--yazi); font-size: 15px; }
+  button { font: inherit; color: var(--yazi); background: var(--kart2); border: 1px solid #3a3a52; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  button:hover { border-color: var(--vurgu); }
+  button.ana { background: var(--vurgu); border-color: var(--vurgu); color: #fff; font-weight: 600; }
+  #bilgi { padding: 6px 16px; color: var(--soluk); font-size: 13px; min-height: 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #izgara { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 4px 16px 24px; }
+  .kart { background: var(--kart); border-radius: 10px; overflow: hidden; cursor: pointer; border: 2px solid transparent; outline: none; }
+  .kart.secili { border-color: var(--altin); box-shadow: 0 0 0 3px rgba(242,193,78,.25); }
+  .kart .resim { aspect-ratio: 3 / 4; background: #0b0b12 center / contain no-repeat; display: flex; align-items: center; justify-content: center; color: #555; font-size: 34px; }
+  .kart .ad { padding: 6px 8px 8px; font-size: 13px; line-height: 1.25; height: 3.4em; overflow: hidden; }
+  #bos { max-width: 560px; margin: 40px auto; padding: 0 16px; }
+  #bos .kutu { background: var(--kart); border-radius: 12px; padding: 20px; }
+  #bos h2 { margin-top: 0; font-size: 20px; }
+  #bos p { color: #c8c8d8; }
+  #bos .dugmeler { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  #durum { color: var(--altin); margin-top: 12px; min-height: 1.4em; }
+  #oyunEkran { position: fixed; inset: 0; background: #000; display: none; z-index: 10; }
+  #oyunEkran iframe { width: 100%; height: 100%; border: 0; }
+  #geri { position: absolute; top: 8px; left: 8px; z-index: 11; opacity: .55; padding: 6px 10px; font-size: 13px; }
+  #geri:hover { opacity: 1; }
+  #ayarlar { display: none; }
+  .gizli { display: none !important; }
+  @media (max-width: 480px) { #izgara { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; } header h1 { font-size: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Retro USB · <span>Commodore 64</span></h1>
+  <input id="ara" type="search" placeholder="Oyun ara..." autocomplete="off">
+  <button id="yeniKlasor" title="USB'deki oyunları yeniden yükle">Klasör seç</button>
+</header>
+<div id="bilgi"></div>
+<div id="izgara"></div>
+
+<div id="bos" class="gizli">
+  <div class="kutu">
+    <h2>Oyunlar bu cihazda yok</h2>
+    <p>Retro USB belleğini tak ve <b>OYUNLAR</b> klasörünü (ya da içindeki <b>C64</b> klasörünü) seç. Oyunlar ve kapaklar
+      yalnız bu tarayıcıya kopyalanır; hiçbir yere gönderilmez. Bir kez seçmen yeter, sonra bellek takılı olmadan da açılır.</p>
+    <p>Klasör seçemeyen telefonlarda tek tek oyun dosyası (.crt, .d64, .prg, .t64, .tap) da seçebilirsin.</p>
+    <div class="dugmeler">
+      <button class="ana" id="klasorSec">OYUNLAR klasörünü seç</button>
+      <button id="dosyaSec">Oyun dosyası seç</button>
+    </div>
+    <div id="durum"></div>
+  </div>
+</div>
+
+<input id="klasorGirdi" type="file" webkitdirectory directory multiple class="gizli">
+<input id="dosyaGirdi" type="file" multiple accept=".crt,.d64,.g64,.t64,.tap,.prg,.d71,.d81,.p00" class="gizli">
+
+<div id="oyunEkran"><button id="geri">← Menü</button></div>
+
+<script>
+'use strict';
+// ------------------------------------------------------------ katalog (stick'teki baslatici/katalog.py ile aynı kurallar)
+const UZ = ['.crt', '.d64', '.g64', '.t64', '.tap', '.prg', '.d71', '.d81', '.p00'];
+const DISK_RE = /[\s_\-(\[]*(?:(?:disk|disc|side|tape)\s*([0-9]+|[A-D])(?:\s*(?:of|\/)\s*[0-9]+)?|part\s*([0-9]+)\s*(?:of|\/)\s*[0-9]+)[\s)\]]*$|_([0-9])$/i;
+const uzanti = a => { const i = a.lastIndexOf('.'); return i < 0 ? '' : a.slice(i).toLowerCase(); };
+const govde = a => { const i = a.lastIndexOf('.'); return i < 0 ? a : a.slice(0, i); };
+const sade = s => s.toLowerCase().replace(/ı/g, 'i').replace(/[^a-z0-9]/g, '');
+
+function gorunenAd(stem) {
+  let ad = stem.replace(/\s*\[[^\]]*\]/g, '').trim(), yil = '', etik = [];
+  const m = ad.match(/\((\d{4})\)/); if (m) yil = m[1];
+  for (const p of ad.matchAll(/\(([^()]*)\)/g)) if (!/^\d{4}$/.test(p[1])) etik.push(p[1].trim());
+  ad = ad.replace(/\s*\([^()]*\)/g, '').trim();
+  return { ad, yil, etik };
+}
+function siraAnahtari(ad) {
+  let s = ad.toLowerCase();
+  for (const on of ['the ', 'a ', 'an ']) if (s.startsWith(on)) { s = s.slice(on.length); break; }
+  return s.replace(/ı/g, 'i').replace(/ç/g, 'c').replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ö/g, 'o').replace(/ü/g, 'u');
+}
+function ayarOku(metin) {
+  const a = {};
+  for (const s of metin.split(/\r?\n/)) {
+    const t = s.trim(); if (!t || t[0] === '#' || t[0] === ';' || t[0] === '[') continue;
+    const i = t.indexOf('='); if (i > 0) a[t.slice(0, i).trim().toLowerCase()] = t.slice(i + 1).trim();
+  }
+  return a;
+}
+// .retro/gizli.txt: "C64/yol" ya da "ad: <adın başı>" satırları menüde gösterilmez; "goster: <yol>" geri getirir
+function gizliKurallari(metin) {
+  const yollar = new Set(), adlar = [], goster = new Set();
+  for (const s of (metin || '').split(/\r?\n/)) {
+    const t = s.replace(/#.*/, '').trim(); if (!t) continue;
+    if (/^goster\s*:/i.test(t)) goster.add(t.replace(/^goster\s*:/i, '').trim().toLowerCase().replace(/\\/g, '/'));
+    else if (/^ad\s*:/i.test(t)) adlar.push(sade(t.replace(/^ad\s*:/i, '')));
+    else yollar.add(t.toLowerCase().replace(/\\/g, '/'));
+  }
+  return { yollar, adlar, goster };
+}
+
+// Seçilen dosyalardan C64 oyun listesi. Yol, OYUNLAR köküne göre: "C64/PORT2/x.crt", ".retro/kapak/c64/x.png"
+async function katalogKur(dosyalar, durum) {
+  const goreli = f => {
+    const p = (f.webkitRelativePath || f.name).split('/');
+    const i = p.findIndex(x => x.toLowerCase() === 'c64' || x.toLowerCase() === '.retro');
+    return i >= 0 ? p.slice(i).join('/') : p.join('/');   // ör. yalnız PORT2 klasörü seçildi: port klasör adından
+  };
+  const oyunlar = [], kapaklar = new Map(), ayarlar = new Map();
+  let gizliMetin = '';
+  // OYUNLAR ya da C64 klasörü seçildiyse yalnız C64/ altı alınır (.tap gibi uzantılar SPECTRUM'da da var)
+  const c64Kokli = dosyalar.some(f => goreli(f).toLowerCase().startsWith('c64/'));
+  for (const f of dosyalar) {
+    const g = goreli(f), k = g.toLowerCase(), u = uzanti(f.name);
+    if (k === '.retro/gizli.txt') { gizliMetin = await f.text(); continue; }
+    if (['.png', '.jpg', '.jpeg'].includes(u) && (k.startsWith('.retro/kapak/c64/') || k.startsWith('c64/kapak/') || !k.includes('/'))) {
+      // klasördeki kapak (C64/kapak) .retro/kapak'tan önce gelir; stick'te de oyunun yanındaki/klasör kapağı önce
+      const st = govde(f.name).toLowerCase();
+      if (!kapaklar.has(st) || k.startsWith('c64/kapak/')) kapaklar.set(st, f);
+      continue;
+    }
+    if (k.startsWith('.retro/') || k.split('/').some(p => p === 'kapak')) continue;
+    if (u === '.ayar') { ayarlar.set(k.slice(0, -5), f); continue; }
+    if (UZ.includes(u) && (c64Kokli ? k.startsWith('c64/') : true)) oyunlar.push({ f, g });
+  }
+  const gizli = gizliKurallari(gizliMetin);
+  // çok disketli setler: aynı klasörde aynı taban adı + disk numarası -> tek oyun
+  const gruplar = new Map();
+  for (const o of oyunlar) {
+    const klasor = o.g.includes('/') ? o.g.slice(0, o.g.lastIndexOf('/')) : '';
+    const st = govde(o.f.name), m = st.match(DISK_RE);
+    const taban = m ? st.slice(0, m.index) : st;
+    const anahtar = klasor.toLowerCase() + '|' + taban.toLowerCase() + '|' + uzanti(o.f.name);
+    if (!gruplar.has(anahtar)) gruplar.set(anahtar, []);
+    gruplar.get(anahtar).push({ ...o, no: m ? (m[1] || m[2] || m[3]) : '', taban, klasor });
+  }
+  const liste = [];
+  let n = 0;
+  for (const grup of gruplar.values()) {
+    if (grup.length > 1 && grup.some(x => !x.no)) { for (const x of grup) liste.push(await oyunYap([x], x.f.name)); continue; }
+    grup.sort((a, b) => String(a.no).localeCompare(String(b.no), 'tr', { numeric: true }));
+    const ilk = grup[0];
+    liste.push(await oyunYap(grup, grup.length > 1 ? ilk.taban : ilk.f.name));
+    if (++n % 20 === 0) durum && durum(`${n} oyun hazırlandı...`);
+  }
+  async function oyunYap(grup, adKaynak) {
+    const ilk = grup[0];
+    const { ad, yil, etik } = gorunenAd(govde(adKaynak));
+    let port = etik.includes('J1') ? 1 : 2;
+    for (const p of ilk.klasor.split('/')) { const m = p.match(/^port[\s_-]*([12])$/i); if (m) port = +m[1]; }
+    const ayarDosya = ayarlar.get(govde(ilk.g).toLowerCase());
+    const ayar = ayarDosya ? ayarOku(await ayarDosya.text()) : {};
+    if (ayar.port) port = +ayar.port === 1 ? 1 : 2;
+    const kapakF = kapaklar.get(govde(ilk.f.name).toLowerCase()) || kapaklar.get(ilk.taban.toLowerCase());
+    return {
+      kimlik: ilk.g, ad, yil, port, reu: ayar.reu || '', not: ayar.not || '',
+      sira: siraAnahtari(ad), disk: grup.length,
+      dosyalar: grup.map(x => ({ ad: x.f.name, blob: x.f })), kapakF
+    };
+  }
+  const goster = o => gizli.goster.has(o.kimlik.toLowerCase());
+  const sonuc = liste.filter(o => goster(o) || !(gizli.yollar.has(o.kimlik.toLowerCase()) || gizli.adlar.some(a => a && sade(o.ad).startsWith(a))));
+  sonuc.sort((a, b) => a.sira.localeCompare(b.sira, 'tr'));
+  return sonuc;
+}
+
+// kapak: 240 px genişliğe küçültülmüş JPEG (cihazda daha az yer)
+async function kapakKucult(f) {
+  try {
+    const bmp = await createImageBitmap(f);
+    const w = Math.min(240, bmp.width), h = Math.round(bmp.height * w / bmp.width);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+  } catch (e) { return null; }
+}
+
+// ------------------------------------------------------------ IndexedDB: oyunlar bu cihazda kalır
+const VT = new Promise((tamam, hata) => {
+  const r = indexedDB.open('retro-usb-c64', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('oyun', { keyPath: 'kimlik' });
+  r.onsuccess = () => tamam(r.result); r.onerror = () => hata(r.error);
+});
+async function islem(kip, is) {
+  const db = await VT;
+  return new Promise((tamam, hata) => {
+    const t = db.transaction('oyun', kip), s = t.objectStore('oyun'); let sonuc;
+    Promise.resolve(is(s)).then(v => sonuc = v);
+    t.oncomplete = () => tamam(sonuc); t.onerror = () => hata(t.error);
+  });
+}
+const tumOyunlar = () => islem('readonly', s => new Promise(r => { const q = s.getAll(); q.onsuccess = () => r(q.result); }));
+
+async function iceAktar(dosyalar) {
+  const durum = t => document.getElementById('durum').textContent = t;
+  durum('Dosyalar okunuyor...');
+  const liste = await katalogKur([...dosyalar], durum);
+  if (!liste.length) { durum('Bu seçimde C64 oyunu bulunamadı. OYUNLAR ya da C64 klasörünü seç.'); return; }
+  const kayitlar = [];
+  for (let i = 0; i < liste.length; i++) {
+    const o = liste[i];
+    if (i % 10 === 0) durum(`Kopyalanıyor: ${i + 1} / ${liste.length}`);
+    const dosyalarKopya = [];
+    for (const d of o.dosyalar) dosyalarKopya.push({ ad: d.ad, blob: new Blob([await d.blob.arrayBuffer()]) });
+    kayitlar.push({ kimlik: o.kimlik, ad: o.ad, yil: o.yil, port: o.port, reu: o.reu, not: o.not, sira: o.sira, disk: o.disk,
+                    dosyalar: dosyalarKopya, kapak: o.kapakF ? await kapakKucult(o.kapakF) : null });
+  }
+  await islem('readwrite', s => { s.clear(); for (const k of kayitlar) s.put(k); });
+  try { await navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
+  durum(`${kayitlar.length} oyun bu cihaza kaydedildi.`);
+  await yukle();
+}
+
+// ------------------------------------------------------------ menü
+let OYUNLAR = [], gorunen = [], secili = 0;
+const izgara = document.getElementById('izgara'), bilgi = document.getElementById('bilgi'), ara = document.getElementById('ara');
+const kapakURL = new Map();
+
+async function yukle() {
+  OYUNLAR = (await tumOyunlar()).sort((a, b) => a.sira.localeCompare(b.sira, 'tr'));
+  document.getElementById('bos').classList.toggle('gizli', OYUNLAR.length > 0);
+  izgara.classList.toggle('gizli', !OYUNLAR.length);
+  for (const u of kapakURL.values()) URL.revokeObjectURL(u);
+  kapakURL.clear();
+  for (const o of OYUNLAR) if (o.kapak) kapakURL.set(o.kimlik, URL.createObjectURL(o.kapak));
+  ciz();
+}
+function ciz() {
+  const q = sade(ara.value);
+  gorunen = OYUNLAR.filter(o => !q || sade(o.ad).includes(q));
+  izgara.innerHTML = '';
+  gorunen.forEach((o, i) => {
+    const k = document.createElement('div'); k.className = 'kart'; k.tabIndex = -1;
+    const r = document.createElement('div'); r.className = 'resim';
+    const u = kapakURL.get(o.kimlik);
+    if (u) r.style.backgroundImage = `url("${u}")`; else r.textContent = '🕹';
+    const a = document.createElement('div'); a.className = 'ad'; a.textContent = o.ad;
+    k.append(r, a);
+    k.onclick = () => { secili = i; secimGoster(); baslat(o); };
+    izgara.appendChild(k);
+  });
+  secili = Math.min(secili, Math.max(0, gorunen.length - 1));
+  secimGoster();
+  if (OYUNLAR.length && !gorunen.length) bilgi.textContent = 'Aramaya uyan oyun yok';
+}
+function secimGoster() {
+  [...izgara.children].forEach((k, i) => k.classList.toggle('secili', i === secili));
+  const o = gorunen[secili];
+  if (!o) { bilgi.textContent = OYUNLAR.length ? '' : ''; return; }
+  const par = [o.ad]; if (o.yil) par.push(o.yil);
+  par.push(o.dosyalar[0].ad.toLowerCase().endsWith('.crt') ? 'kartuş' : 'disket/kaset');
+  par.push('joystick port ' + o.port);
+  if (o.disk > 1) par.push(o.disk + ' disk (1. disk açılır)');
+  if (o.not) par.push('ⓘ ' + o.not);
+  bilgi.textContent = par.join('  ·  ') + '   —   oklar + Ctrl: joystick · Enter: başlat · Esc (1,5 sn): menü';
+  const k = izgara.children[secili]; if (k) k.scrollIntoView({ block: 'nearest' });
+}
+function sutunSayisi() {
+  const k = izgara.children; if (k.length < 2) return 1;
+  const ust = k[0].offsetTop; let n = 0; while (n < k.length && k[n].offsetTop === ust) n++; return Math.max(1, n);
+}
+
+// ------------------------------------------------------------ oyun
+const oyunEkran = document.getElementById('oyunEkran');
+let oyunAcik = false;
+function baslat(o) {
+  window.oyunSecili = o;
+  const f = document.createElement('iframe');
+  // "*": tek HTML'de oynatıcı srcdoc ve file:// (opak köken); kökensiz izin vermeyince getGamepads hata atıp oyunu durduruyordu
+  f.allow = 'fullscreen *; gamepad *; autoplay *';
+  if (window.GOMULU_OYNA) f.srcdoc = window.GOMULU_OYNA; else f.src = 'oyna.html';   // tek HTML: oynatıcı sayfanın içinde
+  oyunEkran.querySelectorAll('iframe').forEach(x => x.remove());
+  oyunEkran.appendChild(f);
+  oyunEkran.style.display = 'block'; oyunAcik = true;
+  setTimeout(() => f.focus(), 300);
+}
+window.oyunKapat = function () {
+  oyunEkran.querySelectorAll('iframe').forEach(x => x.remove());
+  oyunEkran.style.display = 'none'; oyunAcik = false;
+  setTimeout(() => window.focus(), 50);
+};
+document.getElementById('geri').onclick = () => window.oyunKapat();
+
+addEventListener('keydown', e => {
+  if (oyunAcik) return;
+  if (document.activeElement === ara && !['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) return;
+  const n = gorunen.length; if (!n) return;
+  const s = sutunSayisi();
+  let yeni = secili;
+  if (e.key === 'ArrowRight') yeni++; else if (e.key === 'ArrowLeft') yeni--;
+  else if (e.key === 'ArrowDown') yeni += s; else if (e.key === 'ArrowUp') yeni -= s;
+  else if (e.key === 'Enter') { e.preventDefault(); baslat(gorunen[secili]); return; }
+  else if (e.key === 'Escape') { ara.value = ''; ciz(); ara.blur(); return; }
+  else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) { ara.focus(); return; }
+  else return;
+  e.preventDefault(); if (document.activeElement === ara) ara.blur();
+  secili = Math.max(0, Math.min(n - 1, yeni)); secimGoster();
+});
+ara.addEventListener('input', () => { secili = 0; ciz(); });
+
+const klasorGirdi = document.getElementById('klasorGirdi'), dosyaGirdi = document.getElementById('dosyaGirdi');
+document.getElementById('klasorSec').onclick = () => klasorGirdi.click();
+document.getElementById('dosyaSec').onclick = () => dosyaGirdi.click();
+document.getElementById('yeniKlasor').onclick = () => {
+  if (OYUNLAR.length && !confirm('Oyunlar USB\'den yeniden yüklensin mi? (Bu cihazdaki liste yenisiyle değişir)')) return;
+  document.getElementById('bos').classList.remove('gizli'); izgara.classList.add('gizli');
+  klasorGirdi.click();
+};
+klasorGirdi.onchange = () => klasorGirdi.files.length && iceAktar(klasorGirdi.files);
+dosyaGirdi.onchange = () => dosyaGirdi.files.length && iceAktar(dosyaGirdi.files);
+
+// ------------------------------------------------------------ tek HTML (Masaüstü kopyası, yayımlanmaz)
+// tek_html.py sayfaya window.GOMULU = {oyun: [[yol, deflate-raw base64]], kapak: [[yol, jpeg base64]], metin: [[yol, metin]]}
+// ve GOMULU_EMU_B64 (emülatör dosyaları) koyar. Binlerce oyun olduğu için her oyun ayrı sıkıştırılmış durur ve yalnız
+// başlatılınca açılır; menü için yalnız adlar ve kapaklar kullanılır. USB ve IndexedDB gerekmez.
+async function gomuluAc() {
+  const veri = async b64 => new Uint8Array(await (await fetch('data:application/octet-stream;base64,' + b64)).arrayBuffer());
+  const ac = async b64 => (await new Response((await fetch('data:application/octet-stream;base64,' + b64)).body
+                                             .pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+  // emülatör dosyalarının blob adreslerini oynatıcı (oyna.html) her oyunda kendisi üretir
+  const G = window.GOMULU, dosyalar = [];
+  const sanal = (yol, ek) => Object.assign({ name: yol.split('/').pop(), webkitRelativePath: 'OYUNLAR/' + yol }, ek);
+  for (const [yol, b64] of G.oyun) dosyalar.push(sanal(yol, { arrayBuffer: () => ac(b64) }));
+  for (const [yol, t] of G.metin) dosyalar.push(sanal(yol, { text: async () => t }));
+  for (const [yol, b64] of G.kapak) dosyalar.push(sanal(yol, { url: 'data:image/jpeg;base64,' + b64 }));
+  const liste = await katalogKur(dosyalar);
+  OYUNLAR = liste;
+  for (const x of OYUNLAR) if (x.kapakF) kapakURL.set(x.kimlik, x.kapakF.url);
+  document.getElementById('yeniKlasor').classList.add('gizli');
+  ciz();
+}
+if (window.GOMULU) { bilgi.textContent = 'Oyunlar açılıyor...'; gomuluAc(); } else yukle();
+</script>
+</body>
+</html>
